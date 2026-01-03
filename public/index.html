@@ -1,43 +1,161 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#000000" />
-    <meta
-      name="description"
-      content="Web site created using create-react-app"
-    />
-    <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
-    <!--
-      manifest.json provides metadata used when your web app is installed on a
-      user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
-    -->
-    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
-    <!--
-      Notice the use of %PUBLIC_URL% in the tags above.
-      It will be replaced with the URL of the `public` folder during the build.
-      Only files inside the `public` folder can be referenced from the HTML.
+	<head>
+		  <meta charset="UTF-8">
+		    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+		      <title>PayZero - Easy Crypto Payments</title>
+		        <script src="https://cdn.tailwindcss.com"></script>
+			  <script src="https://auth.magic.link/sdk"></script>
+			    <script src="https://cdn.ethers.io/lib/ethers-5.7.umd.min.js"></script>
+	</head>
+	<body class="bg-gradient-to-br from-purple-600 via-blue-600 to-cyan-500 min-h-screen">
+		  <div id="app" class="flex items-center justify-center min-h-screen p-4"></div>
 
-      Unlike "/favicon.ico" or "favicon.ico", "%PUBLIC_URL%/favicon.ico" will
-      work correctly both with client-side routing and a non-root public URL.
-      Learn how to configure a non-root public URL by running `npm run build`.
-    -->
-    <title>React App</title>
-  </head>
-  <body>
-    <noscript>You need to enable JavaScript to run this app.</noscript>
-    <div id="root"></div>
-    <!--
-      This HTML file is a template.
-      If you open it directly in the browser, you will see an empty page.
+		    <script>
+			        // Configuration
+			        const MAGIC_API_KEY = 'pk_live_YOUR_KEY_HERE'; // Replace with your Magic.link key
+				    const BASE_SEPOLIA_RPC = 'https://sepolia.base.org';
+				    const CHAIN_ID = 84532;
+				    const USDC_ADDRESS = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
+				    
+				    // Currency conversion rates (mock - in production use real API)
+				    const RATES = {
+					          USD: 1,
+					          NGN: 1650,      // Nigerian Naira
+					          MAD: 10.2,      // Moroccan Dirham
+					          EUR: 0.92,
+					          GBP: 0.79
+					        };
 
-      You can add webfonts, meta tags, or analytics to this file.
-      The build step will place the bundled scripts into the <body> tag.
+				    // State
+				    let state = {
+					          view: 'welcome',
+					          user: null,
+					          magic: null,
+					          provider: null,
+					          signer: null,
+					          balance: { ETH: '0', USDC: '0' },
+					          currency: 'USD',
+					          username: '',
+					          recipient: '',
+					          amount: '',
+					          qrData: '',
+					          txHash: '',
+					          error: '',
+					          loading: false
+					        };
 
-      To begin the development, run `npm start` or `yarn start`.
-      To create a production bundle, use `npm run build` or `yarn build`.
-    -->
-  </body>
-</html>
+				    // Mock user database (in production, use real backend)
+				    const users = JSON.parse(localStorage.getItem('payzero_users') || '{}');
+
+				    function saveUsers() {
+					          localStorage.setItem('payzero_users', JSON.stringify(users));
+					        }
+
+				    // Initialize Magic
+				    async function initMagic() {
+					          if (MAGIC_API_KEY === 'pk_live_YOUR_KEY_HERE') {
+							          state.error = 'Please add your Magic.link API key in the code';
+							          render();
+							          return false;
+							        }
+					          
+					          try {
+							          state.magic = new Magic(MAGIC_API_KEY, {
+									            network: {
+											                rpcUrl: BASE_SEPOLIA_RPC,
+											                chainId: CHAIN_ID
+											              }
+									          });
+							          
+							          state.provider = new ethers.providers.Web3Provider(state.magic.rpcProvider);
+							          
+							          // Check if already logged in
+							          const isLoggedIn = await state.magic.user.isLoggedIn();
+							          if (isLoggedIn) {
+									            await loadUser();
+									          }
+							          return true;
+							        } catch (err) {
+									        state.error = 'Failed to initialize Magic: ' + err.message;
+									        render();
+									        return false;
+									      }
+					        }
+
+				    // Load user data
+				    async function loadUser() {
+					          try {
+							          const metadata = await state.magic.user.getMetadata();
+							          state.signer = state.provider.getSigner();
+							          const address = await state.signer.getAddress();
+							          
+							          // Check if user has username
+							          const existingUser = Object.entries(users).find(([_, data]) => 
+									            data.address.toLowerCase() === address.toLowerCase()
+									          );
+							          
+							          if (existingUser) {
+									            state.username = existingUser[0];
+									            state.user = { email: metadata.email, address };
+									            await fetchBalances();
+									            state.view = 'home';
+									          } else {
+											            state.user = { email: metadata.email, address };
+											            state.view = 'create-username';
+											          }
+							          render();
+							        } catch (err) {
+									        state.error = err.message;
+									        render();
+									      }
+					        }
+
+				    // Email login
+				    async function loginWithEmail() {
+					          const email = document.getElementById('email-input').value.trim();
+					          if (!email) {
+							          state.error = 'Please enter your email';
+							          render();
+							          return;
+							        }
+
+					          state.loading = true;
+					          state.error = '';
+					          render();
+
+					          try {
+							          await state.magic.auth.loginWithMagicLink({ email });
+							          await loadUser();
+							        } catch (err) {
+									        state.error = 'Login failed: ' + err.message;
+									        state.loading = false;
+									        render();
+									      }
+					        }
+
+				    // Create username
+				    async function createUsername() {
+					          const username = document.getElementById('username-input').value.trim().toLowerCase();
+					          
+					          if (!username) {
+							          state.error = 'Please enter a username';
+							          render();
+							          return;
+							        }
+					          
+					          if (!/^[a-z0-9_]{3,20}$/.test(username)) {
+							          state.error = 'Username must be 3-20 characters (letters, numbers, underscore only)';
+							          render();
+							          return;
+							        }
+					          
+					          if (users[username]) {
+							          state.error = 'Username already taken';
+							          render();
+							          return;
+							        }
+
+					          users[username] = { address: state.user.address };
+					          saveUsers();
+					          state.username = 
